@@ -7,7 +7,7 @@ This standalone, modern Jetpack Compose Android application solves this problem.
 ## Key Features
 
 * **Direct Backup Loading**: Decodes `.tachibk` and `.proto.gz` backup files on-device using a pure Kotlin implementation of the Protobuf backup schema.
-* **Smart Matching & Filtering**: Uses regex word boundary patterns to match legacy folder formats (e.g. `Chapter 194`, `Ch. 12`) to correct manga chapters, avoiding false substring matches (e.g., preventing `Chapter 194` from matching `Chapter 19` or `Chapter 1`).
+* **Smart Matching & Filtering**: Uses intelligent boundary matching to identify legacy folder names (e.g., `Chapter 182_`, `Ch. 12`) without falling victim to regex word boundary limitations (which fail on underscores or incorrectly match integer chapters like `168` to decimal chapters like `168.5`).
 * **Interactive Tree Selection**: Displays discovered sources and mangas in an interactive hierarchy. You can select exactly which mangas to scan.
 * **Scanlator Resolving**: Resolves multiple scanlators for a single chapter number, presenting them as options inside an expandable tree view.
 * **All Files Access**: Uses Android's storage permission framework to rename folders safely under public directories.
@@ -31,10 +31,10 @@ This standalone, modern Jetpack Compose Android application solves this problem.
 ## 🛠️ How it Works under the Hood
 
 1. **Schema Decoder**: Re-implements Tachiyomi's Protobuf backup structure locally to extract manga metadata, titles, chapter URLs, chapter names, and scanlator information.
-2. **Scan & Compare**: Matches local chapter folders in the target directory (e.g., `Chapter 194`) against chapter entries in the backup using regex word boundaries:
-   ```kotlin
-   Regex("\\b(Chapter|Ch|Ch\\.)\\s*${chapterNumber}\\b", RegexOption.IGNORE_CASE)
-   ```
+2. **Scan & Compare**: Matches local chapter folders in the target directory (e.g., `Chapter 194`) against chapter entries in the backup using custom token boundaries:
+   - Ensures the chapter number is not preceded by a digit or dot (preventing suffix matches like `94` in `194` or decimal fractions like `.5` in `168.5`).
+   - Ensures the chapter number is not succeeded by a digit or a dot followed by a digit (preventing prefix matches like `19` in `194` or matching integer chapters like `168` to decimal chapters like `168.5`).
+   - Handles underscores (`_`), spaces, hyphens, and parenthesis boundaries correctly.
 3. **Rename & Reindex**: Renames selected directory folders. After finishing, it prompts the user to perform a **Reindex downloads** operation in TachiyomiSY:
    * **More tab** ➔ **Settings** ➔ **Advanced** ➔ **Reindex downloads**
 

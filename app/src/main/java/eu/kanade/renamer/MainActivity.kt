@@ -1193,6 +1193,38 @@ fun getChapterDirName(chapterName: String, chapterScanlator: String?, chapterUrl
     return "${dirName}_${getUrlHash(chapterUrl)}"
 }
 
+fun containsChapterNumber(itemNoExt: String, numStr: String): Boolean {
+    var index = 0
+    while (true) {
+        val foundIndex = itemNoExt.indexOf(numStr, index, ignoreCase = true)
+        if (foundIndex == -1) return false
+        
+        val precedingChar = if (foundIndex > 0) itemNoExt[foundIndex - 1] else null
+        val precedingOk = precedingChar == null || (!precedingChar.isDigit() && precedingChar != '.')
+        
+        val nextIndex = foundIndex + numStr.length
+        val succeedingChar = if (nextIndex < itemNoExt.length) itemNoExt[nextIndex] else null
+        
+        var succeedingOk = true
+        if (succeedingChar != null) {
+            if (succeedingChar.isDigit()) {
+                succeedingOk = false
+            } else if (succeedingChar == '.') {
+                val afterDotIndex = nextIndex + 1
+                if (afterDotIndex < itemNoExt.length && itemNoExt[afterDotIndex].isDigit()) {
+                    succeedingOk = false
+                }
+            }
+        }
+        
+        if (precedingOk && succeedingOk) {
+            return true
+        }
+        
+        index = foundIndex + 1
+    }
+}
+
 fun scanFolders(
     mangaList: List<InternalManga>,
     selectedMangas: List<GroupedManga>,
@@ -1244,8 +1276,7 @@ fun scanFolders(
                 
                 itemNoExt == legacyNoScanlator || 
                 itemNoExt == legacyWithScanlator || 
-                Regex("\\b${Regex.escape(numStr)}\\b").containsMatchIn(itemNoExt) ||
-                Regex("\\b(Chapter|Ch|Ch\\.)\\s*${Regex.escape(numStr)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(itemNoExt)
+                containsChapterNumber(itemNoExt, numStr)
             }
             
             for (cand in candidates) {
