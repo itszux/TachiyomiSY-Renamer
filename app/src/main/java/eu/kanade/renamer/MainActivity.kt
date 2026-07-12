@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -133,6 +134,15 @@ fun MainScreen() {
     var selectedFileName by remember { mutableStateOf("") }
     var downloadsPath by remember { mutableStateOf("") }
     var currentStep by remember { mutableStateOf(ScreenStep.CONFIGURATION) }
+    
+    BackHandler(enabled = currentStep != ScreenStep.CONFIGURATION) {
+        when (currentStep) {
+            ScreenStep.TREE_SELECTION -> currentStep = ScreenStep.CONFIGURATION
+            ScreenStep.SCAN_RESULTS -> currentStep = ScreenStep.TREE_SELECTION
+            ScreenStep.ABOUT -> currentStep = ScreenStep.CONFIGURATION
+            else -> {}
+        }
+    }
     
     var groupedSources by remember { mutableStateOf<List<GroupedSource>>(emptyList()) }
     var selectedMangaPaths by remember { mutableStateOf(emptySet<String>()) }
