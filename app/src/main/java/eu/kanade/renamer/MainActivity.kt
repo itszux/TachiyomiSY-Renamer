@@ -82,7 +82,8 @@ data class RenameOption(
     val newPath: String,
     val scanlator: String,
     val chapterName: String,
-    val selected: Boolean = false
+    val selected: Boolean = false,
+    val lackingHashOnly: Boolean = false
 )
 
 data class FolderRenameGroup(
@@ -155,6 +156,7 @@ fun MainScreen() {
     var showCompletionDialog by remember { mutableStateOf(false) }
     var showWelcomeDialog by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var showLackingHashOnly by remember { mutableStateOf(false) }
     
     var logs by remember { mutableStateOf<List<String>>(emptyList()) }
     
@@ -658,17 +660,44 @@ fun MainScreen() {
                 }
 
                 ScreenStep.SCAN_RESULTS -> {
+                    val displayedResults = remember(scanResults, showLackingHashOnly) {
+                        scanResults.map { group ->
+                            val filteredOptions = group.options.filter { option ->
+                                showLackingHashOnly || !option.lackingHashOnly
+                            }
+                            group.copy(options = filteredOptions)
+                        }.filter { it.options.isNotEmpty() }
+                    }
+
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val selectedCount = scanResults.flatMap { it.options }.count { it.selected }
-                            Text("Proposed: ${scanResults.size} folders ($selectedCount selected)", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                            val selectedCount = displayedResults.flatMap { it.options }.count { it.selected }
+                            Text("Proposed: ${displayedResults.size} folders ($selectedCount selected)", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
                             TextButton(onClick = { currentStep = ScreenStep.TREE_SELECTION }) {
                                 Text("Back to Selection", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
                             }
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showLackingHashOnly = !showLackingHashOnly }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = showLackingHashOnly,
+                                onCheckedChange = { showLackingHashOnly = it },
+                                modifier = Modifier.scale(0.8f)
+                            )
+                            Text(
+                                text = "Show already recognized folders (lacking hash)",
+                                color = Color.LightGray,
+                                fontSize = 12.sp
+                            )
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(
@@ -680,7 +709,12 @@ fun MainScreen() {
                                 onClick = {
                                     scanResults = scanResults.map { group ->
                                         group.copy(options = group.options.mapIndexed { idx, opt ->
-                                            opt.copy(selected = (idx == 0))
+                                            val shouldSelect = if (opt.lackingHashOnly && !showLackingHashOnly) {
+                                                false
+                                            } else {
+                                                idx == 0
+                                            }
+                                            opt.copy(selected = shouldSelect)
                                         })
                                     }
                                 },
@@ -741,73 +775,89 @@ fun MainScreen() {
 
                     // Scanned results list
                     if (scanResults.isNotEmpty()) {
-                        LazyColumn(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            scanResults.forEach { group ->
-                                // Group Header (Legacy folder description) - Horizontally scrollable
-                                item {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .horizontalScroll(rememberScrollState())
-                                    ) {
-                                        Text(
-                                            text = "${group.mangaTitle} • ${group.oldName}",
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            fontSize = 13.sp,
-                                            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
-                                        )
-                                    }
-                                }
-
-                                // Indented Options
-                                items(group.options) { option ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                scanResults = toggleOption(scanResults, group, option)
-                                            }
-                                            .padding(vertical = 4.dp, horizontal = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Checkbox(
-                                            checked = option.selected,
-                                            onCheckedChange = {
-                                                scanResults = toggleOption(scanResults, group, option)
-                                            },
-                                            modifier = Modifier.scale(0.8f)
-                                        )
-                                        Column(
+                        if (displayedResults.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No folders need renaming.\n(Turn on the toggle above to show already recognized folders)",
+                                    color = Color.Gray,
+                                    fontSize = 12.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                displayedResults.forEach { group ->
+                                    // Group Header (Legacy folder description) - Horizontally scrollable
+                                    item {
+                                        Box(
                                             modifier = Modifier
-                                                .weight(1f)
-                                                .padding(start = 4.dp)
+                                                .fillMaxWidth()
                                                 .horizontalScroll(rememberScrollState())
                                         ) {
                                             Text(
-                                                text = "${option.chapterName} [Scanlator: ${option.scanlator}]",
-                                                color = Color.LightGray,
-                                                fontSize = 12.sp
+                                                text = "${group.mangaTitle} • ${group.oldName}",
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                                fontSize = 13.sp,
+                                                modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                                             )
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        }
+                                    }
+
+                                    // Indented Options
+                                    items(group.options) { option ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    scanResults = toggleOption(scanResults, group, option)
+                                                }
+                                                .padding(vertical = 4.dp, horizontal = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Checkbox(
+                                                checked = option.selected,
+                                                onCheckedChange = {
+                                                    scanResults = toggleOption(scanResults, group, option)
+                                                },
+                                                modifier = Modifier.scale(0.8f)
+                                            )
+                                            Column(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(start = 4.dp)
+                                                    .horizontalScroll(rememberScrollState())
                                             ) {
-                                                Text("➔", fontSize = 11.sp, color = Color.Gray)
-                                                Text(option.newName, fontSize = 11.sp, color = Color.Green)
+                                                Text(
+                                                    text = "${option.chapterName} [Scanlator: ${option.scanlator}]",
+                                                    color = Color.LightGray,
+                                                    fontSize = 12.sp
+                                                )
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    Text("➔", fontSize = 11.sp, color = Color.Gray)
+                                                    Text(option.newName, fontSize = 11.sp, color = Color.Green)
+                                                }
                                             }
                                         }
                                     }
-                                }
 
-                                // Divider below group
-                                item {
-                                    HorizontalDivider(color = Color(0xFF252525), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 2.dp))
+                                    // Divider below group
+                                    item {
+                                        HorizontalDivider(color = Color(0xFF252525), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 2.dp))
+                                    }
                                 }
                             }
                         }
@@ -1276,11 +1326,11 @@ fun scanFolders(
                 numStr = numStr.dropLast(2)
             }
             
+            val legacyNoScanlator = buildValidFilename(if (chapter.name.isBlank()) "Chapter" else chapter.name)
+            val legacyWithScanlator = buildValidFilename(if (!chapter.scanlator.isNullOrBlank()) "${chapter.scanlator}_${chapter.name}" else chapter.name)
+            
             val candidates = existingItems.filter { item ->
                 if (item in correctTargetNames) return@filter false
-                
-                val legacyNoScanlator = buildValidFilename(if (chapter.name.isBlank()) "Chapter" else chapter.name)
-                val legacyWithScanlator = buildValidFilename(if (!chapter.scanlator.isNullOrBlank()) "${chapter.scanlator}_${chapter.name}" else chapter.name)
                 
                 val itemNoExt = if (item.endsWith(".cbz")) item.dropLast(4) else item
                 
@@ -1294,6 +1344,9 @@ fun scanFolders(
                 val finalTarget = if (isCbz) targetCbz else targetName
                 val oldPath = File(mangaDir, cand).absolutePath
                 
+                val itemNoExt = if (cand.endsWith(".cbz")) cand.dropLast(4) else cand
+                val isLackingHash = !chapter.scanlator.isNullOrBlank() && itemNoExt == legacyWithScanlator
+                
                 groupsMap[oldPath] = Pair(matchedManga.title, cand)
                 
                 val options = optionsMap.getOrPut(oldPath) { mutableListOf() }
@@ -1304,7 +1357,8 @@ fun scanFolders(
                             newPath = File(mangaDir, finalTarget).absolutePath,
                             scanlator = chapter.scanlator ?: "None",
                             chapterName = chapter.name,
-                            selected = false
+                            selected = false,
+                            lackingHashOnly = isLackingHash
                         )
                     )
                 }
@@ -1315,7 +1369,7 @@ fun scanFolders(
     val list = groupsMap.map { (oldPath, pair) ->
         val (mangaTitle, oldName) = pair
         val options = optionsMap[oldPath] ?: emptyList()
-        val mappedOptions = if (options.size == 1) {
+        val mappedOptions = if (options.size == 1 && !options[0].lackingHashOnly) {
             listOf(options[0].copy(selected = true))
         } else {
             options
