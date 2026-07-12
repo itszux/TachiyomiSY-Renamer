@@ -157,6 +157,14 @@ fun MainScreen() {
     var showWelcomeDialog by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showLackingHashOnly by remember { mutableStateOf(false) }
+    var scanlatorDropdownExpanded by remember { mutableStateOf(false) }
+    var selectedBulkScanlator by remember { mutableStateOf("") }
+    
+    LaunchedEffect(scanResults) {
+        if (scanResults.isEmpty()) {
+            selectedBulkScanlator = ""
+        }
+    }
     
     var logs by remember { mutableStateOf<List<String>>(emptyList()) }
     
@@ -699,6 +707,84 @@ fun MainScreen() {
                                 fontSize = 12.sp
                             )
                         }
+                        
+                        val allScanlators = remember(scanResults) {
+                            scanResults.flatMap { it.options }
+                                .map { it.scanlator }
+                                .filter { it.isNotBlank() && it != "None" }
+                                .distinct()
+                                .sorted()
+                        }
+                        
+                        if (allScanlators.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "Bulk Scanlator:",
+                                    color = Color.LightGray,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.alignByBaseline()
+                                )
+                                Box(modifier = Modifier.weight(1f)) {
+                                    Button(
+                                        onClick = { scanlatorDropdownExpanded = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF252525)),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = if (selectedBulkScanlator.isEmpty()) "Select Scanlator..." else selectedBulkScanlator,
+                                            fontSize = 12.sp,
+                                            color = Color.White
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = scanlatorDropdownExpanded,
+                                        onDismissRequest = { scanlatorDropdownExpanded = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("None / Reset Selection", fontSize = 12.sp) },
+                                            onClick = {
+                                                selectedBulkScanlator = ""
+                                                scanlatorDropdownExpanded = false
+                                                scanResults = scanResults.map { group ->
+                                                    group.copy(options = group.options.map { it.copy(selected = false) })
+                                                }
+                                            }
+                                        )
+                                        allScanlators.forEach { scanlator ->
+                                            DropdownMenuItem(
+                                                text = { Text(scanlator, fontSize = 12.sp) },
+                                                onClick = {
+                                                    selectedBulkScanlator = scanlator
+                                                    scanlatorDropdownExpanded = false
+                                                    val targetScanlator = scanlator
+                                                    addLog("Bulk selecting scanlator: $targetScanlator")
+                                                    scanResults = scanResults.map { group ->
+                                                        val matchingOption = group.options.find { it.scanlator == targetScanlator }
+                                                        if (matchingOption != null) {
+                                                            val newOptions = group.options.map { option ->
+                                                                option.copy(selected = option.scanlator == targetScanlator)
+                                                            }
+                                                            group.copy(options = newOptions)
+                                                        } else {
+                                                            addLog("Manga: ${group.mangaTitle} - Folder '${group.oldName}' has no option for scanlator '$targetScanlator'. Please select manually.")
+                                                            group
+                                                        }
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
