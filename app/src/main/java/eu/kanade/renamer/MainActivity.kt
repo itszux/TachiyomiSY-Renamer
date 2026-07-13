@@ -151,6 +151,8 @@ fun MainScreen() {
     var isLoadingStructure by remember { mutableStateOf(false) }
     
     var scanResults by remember { mutableStateOf<List<FolderRenameGroup>>(emptyList()) }
+    var allScanResults by remember { mutableStateOf<List<FolderRenameGroup>>(emptyList()) }
+    var mangaRenameCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var isScanning by remember { mutableStateOf(false) }
     var isRenaming by remember { mutableStateOf(false) }
     var showCompletionDialog by remember { mutableStateOf(false) }
@@ -427,6 +429,10 @@ fun MainScreen() {
                                 Toast.makeText(context, "Please select a downloads directory first", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
+                            if (selectedUri == null) {
+                                Toast.makeText(context, "Please select a backup file first", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
                             if (!hasPermission) {
                                 Toast.makeText(context, "Please grant All Files Access permission first", Toast.LENGTH_SHORT).show()
                                 return@Button
@@ -436,9 +442,25 @@ fun MainScreen() {
                             scope.launch(Dispatchers.IO) {
                                 try {
                                     val structures = loadSourcesAndMangas(downloadsPath)
+                                    
+                                    val inputStream = context.contentResolver.openInputStream(selectedUri!!) ?: throw Exception("Could not open file")
+                                    val fileBytes = inputStream.readBytes()
+                                    val mangaList = parseBackup(fileBytes) { }
+                                    
+                                    val allMangas = structures.flatMap { it.mangas }
+                                    val results = scanFolders(mangaList, allMangas) { }
+                                    
+                                    val counts = results.filter { group ->
+                                        group.options.any { !it.lackingHashOnly }
+                                    }.groupBy {
+                                        File(it.oldPath).parentFile?.absolutePath ?: ""
+                                    }.mapValues { (_, groups) -> groups.size }
+                                    
                                     withContext(Dispatchers.Main) {
                                         groupedSources = structures
-                                        selectedMangaPaths = structures.flatMap { it.mangas }.map { it.absolutePath }.toSet()
+                                        allScanResults = results
+                                        mangaRenameCounts = counts
+                                        selectedMangaPaths = emptySet()
                                         isLoadingStructure = false
                                         currentStep = ScreenStep.TREE_SELECTION
                                     }
@@ -457,9 +479,9 @@ fun MainScreen() {
                         if (isLoadingStructure) {
                             CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Loading Directory Structure...")
+                            Text("Loading and scanning directories...")
                         } else {
-                            Text("Load Directory Structure")
+                            Text("Load & Scan Directory")
                         }
                     }
 
@@ -505,6 +527,20 @@ fun MainScreen() {
                             }
                             Button(
                                 onClick = {
+                                    val pathsWithChanges = groupedSources.flatMap { it.mangas }
+                                        .map { it.absolutePath }
+                                        .filter { (mangaRenameCounts[it] ?: 0) > 0 }
+                                        .toSet()
+                                    selectedMangaPaths = pathsWithChanges
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF303030)),
+                                modifier = Modifier.weight(1.2f),
+                                contentPadding = PaddingValues(vertical = 4.dp)
+                            ) {
+                                Text("Select Changes", fontSize = 12.sp)
+                            }
+                            Button(
+                                onClick = {
                                     selectedMangaPaths = emptySet()
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF303030)),
@@ -521,6 +557,8 @@ fun MainScreen() {
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         groupedSources.forEach { source ->
+                            val sourceCount = source.mangas.sumOf { mangaRenameCounts[it.absolutePath] ?: 0 }
+                            
                             // Source Header item
                             item {
                                 val isAllSelected = source.mangas.all { selectedMangaPaths.contains(it.absolutePath) }
@@ -551,10 +589,10 @@ fun MainScreen() {
                                         modifier = Modifier.scale(0.8f)
                                     )
                                     Text(
-                                        text = source.sourceName,
+                                        text = if (sourceCount > 0) "${source.sourceName} ($sourceCount)" else source.sourceName,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 14.sp,
-                                        color = Color.White,
+                                        color = if (sourceCount > 0) MaterialTheme.colorScheme.primary else Color.White,
                                         modifier = Modifier.weight(1f)
                                     )
                                     Icon(
@@ -571,6 +609,7 @@ fun MainScreen() {
                             if (!isCollapsed) {
                                 items(source.mangas) { manga ->
                                 val isMangaChecked = selectedMangaPaths.contains(manga.absolutePath)
+                                val count = mangaRenameCounts[manga.absolutePath] ?: 0
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -596,9 +635,9 @@ fun MainScreen() {
                                         modifier = Modifier.scale(0.75f)
                                     )
                                     Text(
-                                        text = manga.mangaName,
+                                        text = if (count > 0) "${manga.mangaName} ($count)" else manga.mangaName,
                                         fontSize = 12.sp,
-                                        color = Color.LightGray,
+                                        color = if (count > 0) MaterialTheme.colorScheme.primary else Color.LightGray,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -610,54 +649,22 @@ fun MainScreen() {
 
                     Button(
                         onClick = {
-                            if (selectedUri == null) {
-                                Toast.makeText(context, "Please select a backup file first", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
                             if (selectedMangaPaths.isEmpty()) {
                                 Toast.makeText(context, "Please select at least one manga to scan", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
-                            isScanning = true
-                            errorMessage = null
-                            scanResults = emptyList()
-                            logs = emptyList()
-                            addLog("Starting Scan Process...")
-                            
-                            val targetMangaList = groupedSources.flatMap { it.mangas }
-                                .filter { selectedMangaPaths.contains(it.absolutePath) }
-                            
+                            val filtered = allScanResults.filter { group ->
+                                selectedMangaPaths.contains(File(group.oldPath).parentFile?.absolutePath)
+                            }
+                            scanResults = filtered
+                            logs = listOf(
+                                "Starting Scan Process...",
+                                "Filtering scanned results for selected mangas...",
+                                "Scan completed: Found ${filtered.size} folders to rename."
+                            )
                             currentStep = ScreenStep.SCAN_RESULTS
-                            
-                            scope.launch(Dispatchers.IO) {
-                                try {
-                                    addLog("Opening backup file...")
-                                    val inputStream = context.contentResolver.openInputStream(selectedUri!!) ?: throw Exception("Could not open file")
-                                    val fileBytes = inputStream.readBytes()
-                                    
-                                    addLog("Decoding backup data...")
-                                    val mangaList = parseBackup(fileBytes) { msg -> addLog(msg) }
-                                    
-                                    addLog("Scanning selected directories...")
-                                    val results = scanFolders(mangaList, targetMangaList) { msg -> addLog(msg) }
-                                    withContext(Dispatchers.Main) {
-                                        scanResults = results
-                                        isScanning = false
-                                        if (results.isEmpty()) {
-                                            addLog("Scan completed: No legacy folders found.")
-                                            Toast.makeText(context, "No chapters found that need renaming!", Toast.LENGTH_LONG).show()
-                                        } else {
-                                            addLog("Scan completed: Found ${results.size} folders to rename.")
-                                        }
-                                    }
-                                } catch (e: Exception) {
-                                    withContext(Dispatchers.Main) {
-                                        val err = e.message ?: "Unknown error"
-                                        errorMessage = err
-                                        addLog("Error: $err")
-                                        isScanning = false
-                                    }
-                                }
+                            if (filtered.isEmpty()) {
+                                Toast.makeText(context, "No chapters found that need renaming for selected mangas!", Toast.LENGTH_LONG).show()
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
