@@ -1028,7 +1028,7 @@ fun MainScreen() {
                             modifier = Modifier.size(100.dp)
                         )
                         Text("TachiyomiSY Renamer", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.White)
-                        Text("Version 1.0.0", fontSize = 14.sp, color = Color.Gray)
+                        Text("Version 1.0.6", fontSize = 14.sp, color = Color.Gray)
                         Text(
                             "This app resolves issues where source extensions update their URLs, paths, or hashing schemes—which prevents older downloaded chapters from being recognized by Tachiyomi.\n\nIt scans your downloaded chapters, matches them against backup metadata, and renames them to match the new naming scheme expected by the updated extension.",
                             fontSize = 13.sp,
@@ -1346,38 +1346,6 @@ fun getChapterDirName(chapterName: String, chapterScanlator: String?, chapterUrl
     return "${dirName}_${getUrlHash(chapterUrl)}"
 }
 
-fun containsChapterNumber(itemNoExt: String, numStr: String): Boolean {
-    var index = 0
-    while (true) {
-        val foundIndex = itemNoExt.indexOf(numStr, index, ignoreCase = true)
-        if (foundIndex == -1) return false
-        
-        val precedingChar = if (foundIndex > 0) itemNoExt[foundIndex - 1] else null
-        val precedingOk = precedingChar == null || (!precedingChar.isDigit() && precedingChar != '.')
-        
-        val nextIndex = foundIndex + numStr.length
-        val succeedingChar = if (nextIndex < itemNoExt.length) itemNoExt[nextIndex] else null
-        
-        var succeedingOk = true
-        if (succeedingChar != null) {
-            if (succeedingChar.isDigit()) {
-                succeedingOk = false
-            } else if (succeedingChar == '.') {
-                val afterDotIndex = nextIndex + 1
-                if (afterDotIndex < itemNoExt.length && itemNoExt[afterDotIndex].isDigit()) {
-                    succeedingOk = false
-                }
-            }
-        }
-        
-        if (precedingOk && succeedingOk) {
-            return true
-        }
-        
-        index = foundIndex + 1
-    }
-}
-
 fun scanFolders(
     mangaList: List<InternalManga>,
     selectedMangas: List<GroupedManga>,
@@ -1414,11 +1382,6 @@ fun scanFolders(
                 continue // Already correctly named!
             }
             
-            var numStr = chapter.chapterNumber.toString()
-            if (numStr.endsWith(".0")) {
-                numStr = numStr.dropLast(2)
-            }
-            
             val legacyNoScanlator = buildValidFilename(if (chapter.name.isBlank()) "Chapter" else chapter.name)
             val legacyWithScanlator = buildValidFilename(if (!chapter.scanlator.isNullOrBlank()) "${chapter.scanlator}_${chapter.name}" else chapter.name)
             
@@ -1427,9 +1390,16 @@ fun scanFolders(
                 
                 val itemNoExt = if (item.endsWith(".cbz")) item.dropLast(4) else item
                 
-                itemNoExt == legacyNoScanlator || 
-                itemNoExt == legacyWithScanlator || 
-                containsChapterNumber(itemNoExt, numStr)
+                // 1. Check exact name matches
+                if (itemNoExt == legacyNoScanlator || itemNoExt == legacyWithScanlator) {
+                    return@filter true
+                }
+                
+                // 2. Parse using Tachiyomi's official ChapterRecognition logic
+                val parsedNumber = ChapterRecognition.parseChapterNumber(matchedManga.title, itemNoExt)
+                
+                // Only match if a valid chapter number (> -1.0) is extracted, and it matches the backup database chapter number
+                parsedNumber > -1.0 && kotlin.math.abs(parsedNumber - chapter.chapterNumber) < 0.001
             }
             
             for (cand in candidates) {
@@ -1505,3 +1475,96 @@ fun getPathFromUri(context: android.content.Context, uri: Uri): String? {
     }
     return uri.path
 }
+
+// ==========================================
+// TACHIYOMI CHAPTER RECOGNITION ENGINE
+// ==========================================
+object ChapterRecognition {
+
+    private const val NUMBER_PATTERN = """([0-9]+)(\.[0-9]+)?(\.?[a-z]+)?"""
+
+    // Case Ch.xx (e.g., mokushiroku alice vol.1 ch. 4) -> matches 4
+    private val basic = Regex("""(?<=ch\.) *$NUMBER_PATTERN""")
+
+    // Basic number capture
+    private val number = Regex(NUMBER_PATTERN)
+
+    // Unwanted tags like v1, vol2, season 3, etc.
+    private val unwanted = Regex("""\b(?:v|ver|vol|version|volume|season|s)[^a-z]?[0-9]+""")
+
+    // Extra white space before extra/special chapter tags
+    private val unwantedWhiteSpace = Regex("""\s(?=extra|special|omake)""")
+
+    fun parseChapterNumber(
+        mangaTitle: String,
+        chapterName: String,
+        chapterNumber: Double? = null,
+    ): Double {
+        if (chapterNumber != null && (chapterNumber == -2.0 || chapterNumber > -1.0)) {
+            return chapterNumber
+        }
+
+        // Clean chapter name: strip manga title, replace delimiters, clear unwanted whitespaces
+        val sanitizedTitle = buildValidFilename(mangaTitle).lowercase()
+        val cleanChapterName = chapterName.lowercase()
+            .replace(mangaTitle.lowercase(), "")
+            .replace(sanitizedTitle, "")
+            .trim()
+            .replace(',', '.')
+            .replace('-', '.')
+            .replace(unwantedWhiteSpace, "")
+
+        val numberMatch = number.findAll(cleanChapterName)
+
+        when {
+            numberMatch.none() -> {
+                return chapterNumber ?: -1.0
+            }
+            numberMatch.count() > 1 -> {
+                // Strip volume/version descriptors to isolate the true chapter number
+                unwanted.replace(cleanChapterName, "").let { name ->
+                    basic.find(name)?.let { return getChapterNumberFromMatch(it) }
+                    number.find(name)?.let { return getChapterNumberFromMatch(it) }
+                }
+            }
+        }
+
+        return getChapterNumberFromMatch(numberMatch.first())
+    }
+
+    private fun getChapterNumberFromMatch(match: MatchResult): Double {
+        return match.let {
+            val initial = it.groups[1]?.value?.toDouble()!!
+            val subChapterDecimal = it.groups[2]?.value
+            val subChapterAlpha = it.groups[3]?.value
+            val addition = checkForDecimal(subChapterDecimal, subChapterAlpha)
+            initial.plus(addition)
+        }
+    }
+
+    private fun checkForDecimal(decimal: String?, alpha: String?): Double {
+        if (!decimal.isNullOrEmpty()) {
+            return decimal.toDouble()
+        }
+
+        if (!alpha.isNullOrEmpty()) {
+            if (alpha.contains("extra")) return 0.99
+            if (alpha.contains("omake")) return 0.98
+            if (alpha.contains("special")) return 0.97
+
+            val trimmedAlpha = alpha.trimStart('.')
+            if (trimmedAlpha.length == 1) {
+                return parseAlphaPostFix(trimmedAlpha[0])
+            }
+        }
+
+        return 0.0
+    }
+
+    private fun parseAlphaPostFix(alpha: Char): Double {
+        val number = alpha.code - ('a'.code - 1)
+        if (number >= 10) return 0.0
+        return number / 10.0
+    }
+}
+

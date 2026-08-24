@@ -7,9 +7,11 @@ This standalone, modern Jetpack Compose Android application solves this problem.
 ## Key Features
 
 * **Direct Backup Loading**: Decodes `.tachibk` and `.proto.gz` backup files on-device using a pure Kotlin implementation of the Protobuf backup schema.
-* **Smart Matching & Filtering**: Uses intelligent boundary matching to identify legacy folder names (e.g., `Chapter 182_`, `Ch. 12`) without falling victim to regex word boundary limitations (which fail on underscores or incorrectly match integer chapters like `168` to decimal chapters like `168.5`).
-* **Interactive Tree Selection**: Displays discovered sources and mangas in an interactive hierarchy. You can select exactly which mangas to scan.
-* **Scanlator Resolving**: Resolves multiple scanlators for a single chapter number, presenting them as options inside an expandable tree view.
+* **Official Tachiyomi `ChapterRecognition` Engine**: Ported Tachiyomi's official regex-based chapter recognition engine to extract chapter numbers reliably, stripping volume tags (`vol`, `version`, `season`), manga title prefixes, and subchapter tags (`extra`, `omake`, `special`).
+* **Precision Floating-Point Matching**: Solves `Float` vs `Double` precision mismatches from Tachiyomi's backup database (e.g. `11.2f` converting to `11.199999809265137`), ensuring decimal subchapters (`.1`, `.2`) are detected accurately.
+* **Interactive Tree Selection & Rename Counters**: Displays discovered sources and mangas in an interactive hierarchy, pre-scanning and showing the number of pending renames next to each manga/source with a "Select Changes" shortcut.
+* **Bulk Scanlator Selection**: Automatically detects all scanlators across chapter groups and provides a dropdown to bulk-select your preferred scanlator, logging warnings for any chapters requiring manual selection.
+* **Recognized Folder Filtering**: Toggle option to show or hide local download folders that are already correctly recognized by Tachiyomi (lacking only the URL hash).
 * **All Files Access**: Uses Android's storage permission framework to rename folders safely under public directories.
 * **Premium Dark Theme**: Sleek dark mode UI with interactive logs console, progress reporting, and clear horizontal scrollability for long titles.
 
@@ -21,8 +23,8 @@ This standalone, modern Jetpack Compose Android application solves this problem.
    * **More** ➔ **Settings** ➔ **Backup and restore** ➔ **Create backup**
 2. **Select Backup File**: In this helper app, tap **Select Backup File** and choose the backup file you just created.
 3. **Configure Downloads Path**: Type or tap **Browse** to point to your Tachiyomi downloads directory (e.g. `TachiyomiSY/downloads`).
-4. **Select Mangas**: Tap **Load Directory Structure**. Check/uncheck the sources or individual mangas you want to scan, then tap **Scan Selected Mangas**.
-5. **Select Renames**: Review the match options. If a chapter has multiple scanlator options, pick the correct one, then tap **Apply Renames**.
+4. **Select Mangas**: Tap **Load & Scan Directory**. View the pending rename counters next to each manga, tap **Select Changes** (or select manually), then tap **Scan Selected Mangas**.
+5. **Select Renames**: Review the match options. Use the **Bulk Scanlator** dropdown or pick individual scanlators, then tap **Apply Renames**.
 6. **Reindex Downloads**: Finally, open Tachiyomi/TachiyomiSY and run:
    * **More** ➔ **Settings** ➔ **Advanced** ➔ **Reindex downloads**
 
@@ -31,11 +33,9 @@ This standalone, modern Jetpack Compose Android application solves this problem.
 ## 🛠️ How it Works under the Hood
 
 1. **Schema Decoder**: Re-implements Tachiyomi's Protobuf backup structure locally to extract manga metadata, titles, chapter URLs, chapter names, and scanlator information.
-2. **Scan & Compare**: Matches local chapter folders in the target directory (e.g., `Chapter 194`) against chapter entries in the backup using custom token boundaries:
-   - Ensures the chapter number is not preceded by a digit or dot (preventing suffix matches like `94` in `194` or decimal fractions like `.5` in `168.5`).
-   - Ensures the chapter number is not succeeded by a digit or a dot followed by a digit (preventing prefix matches like `19` in `194` or matching integer chapters like `168` to decimal chapters like `168.5`).
-   - Handles underscores (`_`), spaces, hyphens, and parenthesis boundaries correctly.
-3. **Rename & Reindex**: Renames selected directory folders. After finishing, it prompts the user to perform a **Reindex downloads** operation in TachiyomiSY:
+2. **ChapterRecognition Parsing**: Uses Tachiyomi's official regex patterns (`NUMBER_PATTERN`, `basic`, `number`, `unwanted`, `unwantedWhiteSpace`) to clean folder names and isolate true chapter numbers.
+3. **Epsilon Matching**: Uses delta comparison (`abs(parsedNumber - chapter.chapterNumber) < 0.001`) to match parsed numbers against database records, preventing double-precision discrepancies from missing decimal subchapters.
+4. **Rename & Reindex**: Renames selected directory folders. After finishing, it prompts the user to perform a **Reindex downloads** operation in TachiyomiSY:
    * **More tab** ➔ **Settings** ➔ **Advanced** ➔ **Reindex downloads**
 
 ---
